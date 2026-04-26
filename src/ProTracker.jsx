@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 // Configuration
 const CONFIG = {
@@ -167,9 +167,6 @@ const styles = {
     fontFamily: 'inherit',
     boxSizing: 'border-box'
   },
-  inputFocus: {
-    borderColor: '#6C63FF'
-  },
   button: {
     background: '#6C63FF',
     color: '#fff',
@@ -183,24 +180,10 @@ const styles = {
     marginTop: '10px',
     fontFamily: 'inherit'
   },
-  buttonDisabled: {
-    opacity: '0.5',
-    cursor: 'not-allowed'
-  },
   loading: {
     textAlign: 'center',
     padding: '40px 20px',
     color: '#bbb'
-  },
-  spinner: {
-    display: 'inline-block',
-    width: '30px',
-    height: '30px',
-    border: '3px solid #eee',
-    borderTop: '3px solid #6C63FF',
-    borderRadius: '50%',
-    animation: 'spin 0.7s linear infinite',
-    marginBottom: '10px'
   },
   row: {
     display: 'flex',
@@ -210,35 +193,14 @@ const styles = {
   col: {
     flex: 1
   },
-  stat: {
-    background: '#fff',
-    borderRadius: '14px',
-    padding: '12px',
-    textAlign: 'center'
-  },
-  statValue: {
-    fontSize: '18px',
-    fontWeight: '800'
-  },
-  statLabel: {
-    fontSize: '10px',
-    color: '#bbb',
-    marginTop: '2px',
-    fontWeight: '700'
-  },
   alert: {
-    background: '#fff3e0',
-    border: '1px solid #ffe0b2',
+    background: '#e8f5e9',
+    border: '1px solid #c8e6c9',
     borderRadius: '10px',
     padding: '10px',
     fontSize: '12px',
-    color: '#e65100',
+    color: '#2e7d32',
     marginBottom: '10px'
-  },
-  successAlert: {
-    background: '#e8f5e9',
-    border: '1px solid #c8e6c9',
-    color: '#2e7d32'
   },
   text: {
     fontSize: '12px',
@@ -251,13 +213,10 @@ const styles = {
 // Call Apps Script API
 async function callAPI(functionName, ...args) {
   try {
-    const url = `${CONFIG.APPS_SCRIPT_URL}?function=${functionName}`;
-    const params = {
+    const response = await fetch(CONFIG.APPS_SCRIPT_URL, {
       method: 'POST',
-      payload: JSON.stringify(args)
-    };
-    
-    const response = await fetch(url, params);
+      body: JSON.stringify({ function: functionName, parameters: args })
+    });
     const result = await response.text();
     return JSON.parse(result);
   } catch (error) {
@@ -283,28 +242,7 @@ export default function ProTracker() {
   const [budgetInput, setBudgetInput] = useState({ needs: '', wants: '', saving: '' });
   const [message, setMessage] = useState('');
 
-  // Load data on mount and when month changes
-  useEffect(() => {
-    loadData();
-    loadAvailableMonths();
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [month, year]);
-
-  const loadAvailableMonths = async () => {
-    try {
-      const result = await callAPI('getAvailableMonths');
-      if (result && !result.error) {
-        setAvailableMonths(result);
-      }
-    } catch (error) {
-      console.error('Failed to load available months', error);
-    }
-  };
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const data = await callAPI('getMonthData', month, year);
@@ -327,7 +265,25 @@ export default function ProTracker() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [month, year]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const loadAvailableMonths = async () => {
+      try {
+        const result = await callAPI('getAvailableMonths');
+        if (result && !result.error) {
+          setAvailableMonths(result);
+        }
+      } catch (error) {
+        console.error('Failed to load available months', error);
+      }
+    };
+    loadAvailableMonths();
+  }, []);
 
   const saveBudget = async () => {
     if (!budgetInput.needs || !budgetInput.wants || !budgetInput.saving) {
@@ -354,22 +310,6 @@ export default function ProTracker() {
 
     const spent = monthData.spent || {};
     const budget = monthData.budget || {};
-    const p1Income = CONFIG.P1_INCOME;
-    const p2Income = CONFIG.P2_INCOME;
-    const p1Ratio = p1Income / (p1Income + p2Income);
-
-    const p1ShareNeeds = Math.round(budget.needs * p1Ratio);
-    const p1ShareWants = Math.round(budget.wants * p1Ratio);
-    const p2ShareNeeds = Math.round(budget.needs - p1ShareNeeds);
-    const p2ShareWants = Math.round(budget.wants - p1ShareWants);
-
-    const p1PersonalSpent = monthData.transactions
-      .filter(t => t.paidBy === CONFIG.P1_NAME && t.amount < 0)
-      .reduce((a, t) => a + Math.abs(t.amount), 0);
-
-    const p2PersonalSpent = monthData.transactions
-      .filter(t => t.paidBy === CONFIG.P2_NAME && t.amount < 0)
-      .reduce((a, t) => a + Math.abs(t.amount), 0);
 
     const totalSpent = spent.needs + spent.wants;
 
@@ -408,61 +348,10 @@ export default function ProTracker() {
     );
   };
 
-  const renderMyMoney = () => {
-    if (!monthData) return <div style={styles.loading}>Loading...</div>;
-
-    const p1Income = CONFIG.P1_INCOME;
-    const p2Income = CONFIG.P2_INCOME;
-    const p1Ratio = p1Income / (p1Income + p2Income);
-
-    const budget = monthData.budget || {};
-    const p1ShareNeeds = Math.round(budget.needs * p1Ratio);
-    const p1ShareWants = Math.round(budget.wants * p1Ratio);
-
-    const p1SharedSpent = monthData.transactions
-      .filter(t => t.paidBy === CONFIG.P1_NAME && t.amount < 0)
-      .reduce((a, t) => a + Math.abs(t.amount), 0);
-
-    const p1PersonalSpent = monthData.transactions
-      .filter(t => t.paidBy === CONFIG.P1_NAME && t.amount < 0 && t.bucket === 'Personal')
-      .reduce((a, t) => a + Math.abs(t.amount), 0);
-
-    return (
-      <div style={styles.content}>
-        <div style={styles.card}>
-          <div style={styles.section}>{CONFIG.P1_NAME}'s Share</div>
-          <div style={styles.text}>Income: {CONFIG.P1_INCOME.toLocaleString('sv-SE')} kr ({(p1Ratio * 100).toFixed(1)}%)</div>
-          <ProgressBar label="Needs (Shared)" spent={Math.round(p1ShareNeeds * 0.8)} budget={p1ShareNeeds} color="#6C63FF" />
-          <ProgressBar label="Wants (Shared)" spent={Math.round(p1ShareWants * 0.8)} budget={p1ShareWants} color="#fc5c7d" />
-          <div style={{ ...styles.progressContainer, marginTop: '14px' }}>
-            <div style={styles.progressLabel}>
-              <span>Personal Spending</span>
-              <span>{Math.round(p1PersonalSpent).toLocaleString('sv-SE')} kr</span>
-            </div>
-            <div style={styles.text}>Money you've spent on your own items</div>
-          </div>
-        </div>
-
-        <div style={styles.card}>
-          <div style={styles.section}>{CONFIG.P2_NAME}'s Share</div>
-          <div style={styles.text}>Income: {CONFIG.P2_INCOME.toLocaleString('sv-SE')} kr ({((1-p1Ratio) * 100).toFixed(1)}%)</div>
-          <div style={styles.text}>Your partner's allocation and spending</div>
-        </div>
-      </div>
-    );
-  };
-
   const renderBudget = () => {
     return (
       <div style={styles.content}>
-        {message && (
-          <div style={{
-            ...styles.alert,
-            ...(message.includes('✓') ? styles.successAlert : {})
-          }}>
-            {message}
-          </div>
-        )}
+        {message && <div style={styles.alert}>{message}</div>}
 
         <div style={styles.card}>
           <div style={styles.section}>Set Budget for {month} {year}</div>
@@ -497,36 +386,6 @@ export default function ProTracker() {
             Save Budget
           </button>
         </div>
-
-        <div style={styles.card}>
-          <div style={styles.section}>Quick Presets</div>
-          <button
-            style={{ ...styles.button, marginTop: '6px' }}
-            onClick={() => {
-              const income = CONFIG.P1_INCOME + CONFIG.P2_INCOME;
-              setBudgetInput({
-                needs: Math.round(income * 0.5),
-                wants: Math.round(income * 0.3),
-                saving: Math.round(income * 0.2)
-              });
-            }}
-          >
-            50/30/20 (Default)
-          </button>
-          <button
-            style={{ ...styles.button, marginTop: '6px' }}
-            onClick={() => {
-              const income = CONFIG.P1_INCOME + CONFIG.P2_INCOME;
-              setBudgetInput({
-                needs: Math.round(income * 0.4),
-                wants: Math.round(income * 0.3),
-                saving: Math.round(income * 0.3)
-              });
-            }}
-          >
-            40/30/30 (More Savings)
-          </button>
-        </div>
       </div>
     );
   };
@@ -542,12 +401,10 @@ export default function ProTracker() {
             <div style={styles.col}>
               <div style={{ fontSize: '14px', fontWeight: '700' }}>{CONFIG.P1_NAME}</div>
               <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>Paid: {Math.round(settlement.p1Paid).toLocaleString('sv-SE')} kr</div>
-              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)' }}>Income: {settlement.p1Ratio}%</div>
             </div>
             <div style={styles.col}>
               <div style={{ fontSize: '14px', fontWeight: '700' }}>{CONFIG.P2_NAME}</div>
               <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', marginTop: '4px' }}>Paid: {Math.round(settlement.p2Paid).toLocaleString('sv-SE')} kr</div>
-              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)' }}>Income: {settlement.p2Ratio}%</div>
             </div>
           </div>
           <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
@@ -559,49 +416,21 @@ export default function ProTracker() {
     );
   };
 
-  const renderTrends = () => {
-    if (!trends || trends.length === 0) return <div style={styles.loading}>No data yet</div>;
-
-    return (
-      <div style={styles.content}>
-        <div style={styles.card}>
-          <div style={styles.section}>Last 3 Months</div>
-          {trends.map((t, idx) => (
-            <div key={idx} style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: idx < trends.length - 1 ? '1px solid #f0f0f0' : 'none' }}>
-              <div style={{ fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>{t.month} {t.year}</div>
-              <ProgressBar label="Needs" spent={t.spent.needs} budget={t.budget.needs} color="#6C63FF" />
-              <ProgressBar label="Wants" spent={t.spent.wants} budget={t.budget.wants} color="#fc5c7d" />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   const monthOptions = availableMonths.length > 0 
     ? availableMonths 
     : MONTHS.map((m, idx) => ({ month: m, year: currentYear, sort: currentYear * 100 + idx }));
 
   return (
     <div style={styles.container}>
-      {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerTitle}>ProTracker</div>
         <div style={styles.selectors}>
-          <select
-            style={styles.select}
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-          >
+          <select style={styles.select} value={month} onChange={(e) => setMonth(e.target.value)}>
             {monthOptions.map(m => (
               <option key={`${m.month}-${m.year}`} value={m.month}>{m.month.substring(0, 3)}</option>
             ))}
           </select>
-          <select
-            style={styles.select}
-            value={year}
-            onChange={(e) => setYear(parseInt(e.target.value))}
-          >
+          <select style={styles.select} value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
             {[currentYear - 1, currentYear, currentYear + 1].map(y => (
               <option key={y} value={y}>{y}</option>
             ))}
@@ -609,9 +438,8 @@ export default function ProTracker() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={styles.tabs}>
-        {['dashboard', 'myMoney', 'budget', 'settlement', 'trends'].map(v => (
+        {['dashboard', 'budget', 'settlement'].map(v => (
           <button
             key={v}
             style={{
@@ -621,37 +449,23 @@ export default function ProTracker() {
             onClick={() => setView(v)}
           >
             {v === 'dashboard' && 'Overview'}
-            {v === 'myMoney' && 'My Money'}
             {v === 'budget' && 'Budget'}
             {v === 'settlement' && 'Settlement'}
-            {v === 'trends' && 'Trends'}
           </button>
         ))}
       </div>
 
-      {/* Content */}
       <div style={styles.scroll}>
         {loading && !monthData ? (
-          <div style={styles.loading}>
-            <div style={styles.spinner}></div>
-            <div>Loading...</div>
-          </div>
+          <div style={styles.loading}>Loading...</div>
         ) : (
           <>
             {view === 'dashboard' && renderDashboard()}
-            {view === 'myMoney' && renderMyMoney()}
             {view === 'budget' && renderBudget()}
             {view === 'settlement' && renderSettlement()}
-            {view === 'trends' && renderTrends()}
           </>
         )}
       </div>
-
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
 }
